@@ -139,3 +139,17 @@ export function t3OrchestrationSystemPrompt(
 ): string | undefined {
   return hasT3Mcp ? orchestrationInstructions(hasDeviceTools) : undefined;
 }
+
+/** Per-turn guidance while the user has simple-task delegation on; it applies to that turn only. */
+export function t3DelegationInstructions(target: {
+  readonly providerInstanceId: string;
+  readonly model: string;
+}): string {
+  const targetJson = JSON.stringify({
+    providerInstanceId: target.providerInstanceId,
+    model: target.model,
+  });
+  return `## T3 Code delegation (this turn)
+
+To save the user's usage, hand mechanical subtasks (renames, formatting, file searches, repetitive tests, translations, log summaries) to \`delegate_task\` with \`target: ${targetJson}\` and a self-contained brief. Keep design, hard debugging and the final review yourself, and check what each delegate returns. Do a subtask yourself when it is quicker than writing its brief. If that delegate fails on quota, balance or a usage limit, do its part yourself and delegate nothing more to it this turn.`;
+}

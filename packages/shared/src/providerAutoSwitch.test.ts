@@ -1,13 +1,22 @@
 import {
   DEFAULT_SERVER_SETTINGS,
   ProviderDriverKind,
+  ProjectId,
   ProviderInstanceId,
   type ModelSelection,
   type ServerProvider,
 } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { autoSwitchThresholdReached, nextAutoSwitchTarget } from "./providerAutoSwitch.ts";
+import {
+  autoSwitchThresholdReached,
+  DELEGATION_COOLDOWN_MS,
+  delegationCooldownsAfterRun,
+  delegationTargetState,
+  isQuotaFailure,
+  nextAutoSwitchTarget,
+  projectAutoSwitchSettings,
+} from "./providerAutoSwitch.ts";
 
 const selection = (instanceId: string): ModelSelection => ({
   instanceId: ProviderInstanceId.make(instanceId),
@@ -96,5 +105,113 @@ describe("autoSwitchThresholdReached", () => {
     expect(
       autoSwitchThresholdReached(route("a"), [provider("a", { weekly: 100 })], selection("a")),
     ).toBe(false);
+  });
+});
+
+describe("projectAutoSwitchSettings", () => {
+  const personal = ProjectId.make("personal");
+  const work = ProjectId.make("work");
+  const disabled = { enabled: false };
+  const accounts = ["mine-1", "mine-2", "company-1", "company-2"];
+  const settings = {
+    ...DEFAULT_SERVER_SETTINGS,
+    providerInstances: Object.fromEntries(
+      accounts.map((id) => [id, { driver: ProviderDriverKind.make("codex") }]),
+    ),
+    providerAutoSwitch: route(...accounts),
+    projectSettingsOverrides: {
+      [personal]: { providerInstances: { "company-1": disabled, "company-2": disabled } },
+      [work]: { providerAutoSwitch: route("company-2", "company-1", "mine-1") },
+    },
+  };
+  const steps = (projectId: ProjectId | null) =>
+    projectAutoSwitchSettings(settings, projectId).route.map((step) => step.instanceId);
+
+  it("drops route steps on providers the project disables", () => {
+    expect(steps(personal)).toEqual(["mine-1", "mine-2"]);
+    expect(
+      nextAutoSwitchTarget(
+        projectAutoSwitchSettings(settings, personal),
+        accounts.map((id) => provider(id)),
+        selection("mine-2"),
+      ),
+    ).toEqual(selection("mine-1"));
+  });
+
+  it("follows the project's own route and keeps the global one elsewhere", () => {
+    expect(steps(work)).toEqual(["company-2", "company-1", "mine-1"]);
+    expect(steps(null)).toEqual(accounts);
+  });
+});
+
+describe("simple task delegation", () => {
+  const now = Date.parse("2026-11-19T12:00:00.000Z");
+  const deepseek = { instanceId: ProviderInstanceId.make("opencode"), model: "deepseek/v4" };
+  const settings = {
+    ...DEFAULT_SERVER_SETTINGS,
+    providerInstances: { opencode: { driver: ProviderDriverKind.make("opencode"), enabled: true } },
+    simpleTaskDelegation: { enabled: true, target: deepseek },
+  };
+  const failedDelegate = (
+    failure: {
+      lastErrorClass?: "usage_limit" | "provider_error";
+      lastErrorCode?: string;
+      lastError?: string;
+    },
+    relationshipToParent: "subagent" | null = "subagent",
+  ) =>
+    ({
+      status: "failed" as const,
+      lastErrorClass: failure.lastErrorClass ?? "provider_error",
+      lastErrorCode: failure.lastErrorCode ?? null,
+      lastError: failure.lastError ?? null,
+      modelSelection: deepseek,
+      lineage: { relationshipToParent, parentThreadId: null },
+    }) as unknown as Parameters<typeof delegationCooldownsAfterRun>[1];
+
+  it("treats usage limits and balance errors as quota failures", () => {
+    expect(isQuotaFailure({ lastErrorClass: "usage_limit" })).toBe(true);
+    expect(isQuotaFailure({ lastErrorCode: "provider.quota" })).toBe(true);
+    expect(isQuotaFailure({ lastError: "402 Insufficient Balance" })).toBe(true);
+    expect(isQuotaFailure({ lastError: "You exceeded your current quota" })).toBe(true);
+    expect(isQuotaFailure({ lastErrorClass: "provider_error", lastError: "socket hang up" })).toBe(
+      false,
+    );
+  });
+
+  it("cools a target down for an hour after its delegate runs out of balance", () => {
+    const cooldowns = delegationCooldownsAfterRun(
+      settings,
+      failedDelegate({ lastError: "Insufficient Balance" }),
+      now,
+    );
+    expect(cooldowns).toEqual({ opencode: "2026-11-19T13:00:00.000Z" });
+    const cooled = { ...settings, delegationCooldowns: cooldowns ?? {} };
+    expect(delegationTargetState(cooled, [provider("opencode")], null, now + 1).status).toBe(
+      "cooling",
+    );
+    expect(
+      delegationTargetState(cooled, [provider("opencode")], null, now + DELEGATION_COOLDOWN_MS)
+        .status,
+    ).toBe("ready");
+  });
+
+  it("leaves cooldowns alone for other failures and for top-level threads", () => {
+    expect(
+      delegationCooldownsAfterRun(settings, failedDelegate({ lastError: "socket hang up" }), now),
+    ).toBeNull();
+    expect(
+      delegationCooldownsAfterRun(
+        settings,
+        failedDelegate({ lastError: "Insufficient Balance" }, null),
+        now,
+      ),
+    ).toBeNull();
+  });
+
+  it("skips a target that reports its usage as spent", () => {
+    expect(
+      delegationTargetState(settings, [provider("opencode", { session: 100 })], null, now),
+    ).toEqual({ status: "unavailable", target: deepseek });
   });
 });

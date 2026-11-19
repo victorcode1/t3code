@@ -1074,6 +1074,15 @@ export const SETTINGS_SEARCH_ITEMS = [
     providerSettingsOnly: true,
   },
   {
+    id: "simple-task-delegation",
+    title: msg("Delegate simple tasks"),
+    to: "/settings/providers",
+    searchTerms: [
+      msg("delegate subagent cheap model save tokens opencode deepseek haiku mechanical tasks"),
+    ],
+    providerSettingsOnly: true,
+  },
+  {
     id: "text-generators",
     title: msg("Text generators"),
     to: "/settings/providers",

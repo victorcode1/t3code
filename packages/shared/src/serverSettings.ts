@@ -607,6 +607,10 @@ export function applyServerSettingsPatch(
     ...(patch.providerAutoSwitch !== undefined
       ? { providerAutoSwitch: patch.providerAutoSwitch }
       : {}),
+    // Clearing a cooldown must drop its key, which deepMerge would keep.
+    ...(patch.delegationCooldowns !== undefined
+      ? { delegationCooldowns: patch.delegationCooldowns }
+      : {}),
     ...(patch.fallbackModelSelection !== undefined
       ? { fallbackModelSelection: patch.fallbackModelSelection }
       : {}),

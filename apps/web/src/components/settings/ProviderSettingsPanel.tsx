@@ -104,6 +104,7 @@ import { ProviderInstanceCard } from "./ProviderInstanceCard";
 import { useSecretSources } from "./SecretSourceInput";
 import { TextGeneratorsSettings } from "./TextGeneratorsSettings";
 import { ProviderAutoSwitchSettings } from "./ProviderAutoSwitchSettings";
+import { SimpleTaskDelegationSettings } from "./SimpleTaskDelegationSettings";
 import { UsageProviderSettings } from "./UsageProviderSettings";
 import { ProviderSetupSection, readAntigravityAuthMethod } from "./ProviderSetupSection";
 import { ProviderAuthenticationSection } from "./ProviderAuthenticationSection";
@@ -1158,6 +1159,15 @@ export function EnvironmentProviderSettings({
         key={`auto-switch:${environmentId}`}
         environmentId={environmentId}
         providers={serverProviders}
+        projectIds={projectIds}
+        readOnly={readOnly}
+      />
+
+      <SimpleTaskDelegationSettings
+        key={`simple-task-delegation:${environmentId}`}
+        environmentId={environmentId}
+        providers={serverProviders}
+        projectIds={projectIds}
         readOnly={readOnly}
       />
 
