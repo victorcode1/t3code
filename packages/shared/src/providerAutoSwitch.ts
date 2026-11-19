@@ -1,14 +1,36 @@
 import {
   isProviderAvailable,
   type ModelSelection,
+  type ProjectId,
   type ProviderAutoSwitchSettings,
   type ProviderAutoSwitchTrigger,
+  resolveProjectProviderInstanceEnabled,
   type ServerProvider,
   type ServerProviderUsageWindow,
+  type ServerSettings,
 } from "@t3tools/contracts";
+
+import { resolveProjectSettings } from "./projectSettings.ts";
 
 const windowApplies = (window: ServerProviderUsageWindow, model: string) =>
   window.modelIds === undefined || window.modelIds.includes(model);
+
+/**
+ * The auto-switch settings a thread in `projectId` follows: the project's own override when it has
+ * one, minus route steps on providers the project disables, so a switch never leaves its allow-list.
+ */
+export function projectAutoSwitchSettings(
+  settings: ServerSettings,
+  projectId: ProjectId | null,
+): ProviderAutoSwitchSettings {
+  const autoSwitch = resolveProjectSettings(settings, projectId).settings.providerAutoSwitch;
+  return {
+    ...autoSwitch,
+    route: autoSwitch.route.filter((step) =>
+      resolveProjectProviderInstanceEnabled(settings, projectId, step.instanceId),
+    ),
+  };
+}
 
 /** Highest reported use, in percent, of the windows of `kind` that apply to `model`. */
 export function usedPercent(

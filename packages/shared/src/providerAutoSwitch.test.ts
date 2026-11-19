@@ -1,13 +1,18 @@
 import {
   DEFAULT_SERVER_SETTINGS,
   ProviderDriverKind,
+  ProjectId,
   ProviderInstanceId,
   type ModelSelection,
   type ServerProvider,
 } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { autoSwitchThresholdReached, nextAutoSwitchTarget } from "./providerAutoSwitch.ts";
+import {
+  autoSwitchThresholdReached,
+  nextAutoSwitchTarget,
+  projectAutoSwitchSettings,
+} from "./providerAutoSwitch.ts";
 
 const selection = (instanceId: string): ModelSelection => ({
   instanceId: ProviderInstanceId.make(instanceId),
@@ -96,5 +101,41 @@ describe("autoSwitchThresholdReached", () => {
     expect(
       autoSwitchThresholdReached(route("a"), [provider("a", { weekly: 100 })], selection("a")),
     ).toBe(false);
+  });
+});
+
+describe("projectAutoSwitchSettings", () => {
+  const personal = ProjectId.make("personal");
+  const work = ProjectId.make("work");
+  const disabled = { enabled: false };
+  const accounts = ["mine-1", "mine-2", "company-1", "company-2"];
+  const settings = {
+    ...DEFAULT_SERVER_SETTINGS,
+    providerInstances: Object.fromEntries(
+      accounts.map((id) => [id, { driver: ProviderDriverKind.make("codex") }]),
+    ),
+    providerAutoSwitch: route(...accounts),
+    projectSettingsOverrides: {
+      [personal]: { providerInstances: { "company-1": disabled, "company-2": disabled } },
+      [work]: { providerAutoSwitch: route("company-2", "company-1", "mine-1") },
+    },
+  };
+  const steps = (projectId: ProjectId | null) =>
+    projectAutoSwitchSettings(settings, projectId).route.map((step) => step.instanceId);
+
+  it("drops route steps on providers the project disables", () => {
+    expect(steps(personal)).toEqual(["mine-1", "mine-2"]);
+    expect(
+      nextAutoSwitchTarget(
+        projectAutoSwitchSettings(settings, personal),
+        accounts.map((id) => provider(id)),
+        selection("mine-2"),
+      ),
+    ).toEqual(selection("mine-1"));
+  });
+
+  it("follows the project's own route and keeps the global one elsewhere", () => {
+    expect(steps(work)).toEqual(["company-2", "company-1", "mine-1"]);
+    expect(steps(null)).toEqual(accounts);
   });
 });

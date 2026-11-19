@@ -1,12 +1,14 @@
 import type {
   EnvironmentId,
   ModelSelection,
+  ProjectId,
   ProviderAutoSwitchMode,
   ProviderAutoSwitchSettings as AutoSwitchSettings,
   ProviderAutoSwitchTrigger,
   ServerProvider,
 } from "@t3tools/contracts";
 import { pickModelSelection } from "@t3tools/shared/model";
+import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { ArrowUpIcon, PlusIcon, XIcon } from "lucide-react";
 import { msg, T, useGT, useMessages } from "gt-react";
 
@@ -33,14 +35,19 @@ const TRIGGERS = [
 
 const THRESHOLDS = [50, 60, 70, 75, 80, 85, 90, 95] as const;
 
-/** Settings for moving a thread to another provider or account when its usage runs low. */
+/**
+ * Settings for moving a thread to another provider or account when its usage runs low. With
+ * `projectIds`, edits those projects' override; the route only offers providers they keep on.
+ */
 export function ProviderAutoSwitchSettings({
   environmentId,
   providers,
+  projectIds,
   readOnly,
 }: {
   readonly environmentId: EnvironmentId;
   readonly providers: ReadonlyArray<ServerProvider>;
+  readonly projectIds: readonly ProjectId[];
   readonly readOnly: boolean;
 }) {
   const setting = useSearchableSetting();
@@ -48,13 +55,25 @@ export function ProviderAutoSwitchSettings({
   const m = useMessages();
   const settings = useEnvironmentSettings(environmentId);
   const updateSettings = useUpdateEnvironmentSettings(environmentId);
-  const autoSwitch = settings.providerAutoSwitch;
-  const entries = providerInstanceEntriesFor(providers, settings, null);
-  const update = (patch: Partial<AutoSwitchSettings>) =>
-    updateSettings({ providerAutoSwitch: { ...autoSwitch, ...patch } });
+  const projectId = projectIds[0] ?? null;
+  const autoSwitch = resolveProjectSettings(settings, projectId).settings.providerAutoSwitch;
+  const entries = providerInstanceEntriesFor(providers, settings, projectId);
+  const update = (patch: Partial<AutoSwitchSettings>) => {
+    const next = { ...autoSwitch, ...patch };
+    if (projectIds.length === 0) return updateSettings({ providerAutoSwitch: next });
+    updateSettings({
+      projectSettingsOverrides: Object.fromEntries(
+        projectIds.map((id) => [
+          id,
+          { ...settings.projectSettingsOverrides[id], providerAutoSwitch: next },
+        ]),
+      ),
+    });
+  };
   const setRoute = (route: ReadonlyArray<ModelSelection>) => update({ route: [...route] });
   const unused = entries.find(
     (entry) =>
+      entry.enabled &&
       entry.models.length > 0 &&
       !autoSwitch.route.some((step) => step.instanceId === entry.instanceId),
   );

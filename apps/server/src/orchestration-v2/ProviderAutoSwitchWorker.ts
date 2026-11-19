@@ -7,7 +7,11 @@ import {
   type RunId,
   type ServerProvider,
 } from "@t3tools/contracts";
-import { autoSwitchReason, nextAutoSwitchTarget } from "@t3tools/shared/providerAutoSwitch";
+import {
+  autoSwitchReason,
+  nextAutoSwitchTarget,
+  projectAutoSwitchSettings,
+} from "@t3tools/shared/providerAutoSwitch";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
@@ -98,14 +102,13 @@ export const layer = Layer.effectDiscard(
       readonly threadId: OrchestrationV2ThreadShell["id"];
       readonly runId: RunId;
     }) {
-      const { providerAutoSwitch } = yield* settings.getSettings;
-      if (providerAutoSwitch.mode !== "route") return;
+      const current = yield* settings.getSettings;
       const thread = yield* projections.getThreadShell(run.threadId);
       if (thread === null) return;
       const commands = autoSwitchCommands({
         thread,
         runId: run.runId,
-        settings: providerAutoSwitch,
+        settings: projectAutoSwitchSettings(current, thread.projectId),
         providers: yield* registry.getProviders,
       });
       for (const command of commands) yield* threads.dispatch(command);

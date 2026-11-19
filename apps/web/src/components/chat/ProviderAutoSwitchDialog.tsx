@@ -12,6 +12,7 @@ import {
   autoSwitchReason,
   isAutoSwitchTargetUsable,
   nextAutoSwitchTarget,
+  projectAutoSwitchSettings,
   usedPercent,
 } from "@t3tools/shared/providerAutoSwitch";
 import { thrownErrorMessage } from "@t3tools/client-runtime/errors";
@@ -77,7 +78,7 @@ export function ProviderAutoSwitchDialog({
   const startTurn = useOrchestrationCommand(threadEnvironment.startTurn, {
     label: "continue on another provider",
   });
-  const autoSwitch = settings.providerAutoSwitch;
+  const autoSwitch = projectAutoSwitchSettings(settings, thread.projectId);
   const run = thread.latestRun;
   const entries = providerInstanceEntriesFor(providers, settings, thread.projectId);
   const reason =
@@ -100,7 +101,9 @@ export function ProviderAutoSwitchDialog({
       : {
           ...autoSwitch,
           route: entries.flatMap((entry) =>
-            entry.models[0] ? [{ instanceId: entry.instanceId, model: entry.models[0].slug }] : [],
+            entry.enabled && entry.models[0]
+              ? [{ instanceId: entry.instanceId, model: entry.models[0].slug }]
+              : [],
           ),
         },
     providers,

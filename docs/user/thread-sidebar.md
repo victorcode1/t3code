@@ -279,6 +279,11 @@ skipping providers past their limit. The switch happens when the current turn
 ends, and the thread's context moves with it. A thread stopped by its limit
 continues on the new provider.
 
+To keep some accounts out of a project, select that project in Settings and
+turn those providers off under **Providers**. Auto-switch never moves a thread
+to a provider its project turns off, and the project can set its own mode and
+route under **Auto-switch provider** while other projects keep the shared one.
+
 On web and desktop, use **Agents** to follow work delegated to subagents.
 On mobile, open a subagent from its conversation card or **Agents**. On iOS
 layouts with an inspector, its thread opens beside the parent. Maximize it to

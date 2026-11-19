@@ -1158,6 +1158,7 @@ export function EnvironmentProviderSettings({
         key={`auto-switch:${environmentId}`}
         environmentId={environmentId}
         providers={serverProviders}
+        projectIds={projectIds}
         readOnly={readOnly}
       />
 
