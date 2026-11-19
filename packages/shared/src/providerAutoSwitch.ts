@@ -1,14 +1,19 @@
 import {
+  isDelegatedAppThread,
   isProviderAvailable,
   type ModelSelection,
+  type OrchestrationV2ThreadShell,
   type ProjectId,
   type ProviderAutoSwitchSettings,
+  type ProviderInstanceId,
   type ProviderAutoSwitchTrigger,
   resolveProjectProviderInstanceEnabled,
   type ServerProvider,
   type ServerProviderUsageWindow,
   type ServerSettings,
 } from "@t3tools/contracts";
+
+import * as DateTime from "effect/DateTime";
 
 import { resolveProjectSettings } from "./projectSettings.ts";
 
@@ -110,4 +115,87 @@ export function autoSwitchReason(input: {
     autoSwitchThresholdReached(input.settings, input.providers, input.selection)
     ? "threshold"
     : null;
+}
+
+export const DELEGATION_COOLDOWN_MS = 60 * 60 * 1000;
+
+// Balance errors such as DeepSeek's HTTP 402 arrive as provider errors, not usage limits.
+const QUOTA_FAILURE_MESSAGE =
+  /insufficient[\s_-]*(balance|quota|credits?|funds)|quota exceeded|exceeded your current quota|credit balance is too low|payment required|out of credits/i;
+
+/** Whether a run failed because its provider ran out of usage, quota, or balance. */
+export function isQuotaFailure(
+  thread: Pick<OrchestrationV2ThreadShell, "lastErrorClass" | "lastErrorCode" | "lastError">,
+): boolean {
+  return (
+    thread.lastErrorClass === "usage_limit" ||
+    /quota|billing|insufficient/i.test(thread.lastErrorCode ?? "") ||
+    QUOTA_FAILURE_MESSAGE.test(thread.lastError ?? "")
+  );
+}
+
+export type DelegationTargetState =
+  | { readonly status: "off" }
+  | { readonly status: "ready"; readonly target: ModelSelection }
+  | { readonly status: "cooling"; readonly target: ModelSelection; readonly until: string }
+  | { readonly status: "unavailable"; readonly target: ModelSelection };
+
+/** Whether threads in `projectId` should hand mechanical subtasks to the delegation target now. */
+export function delegationTargetState(
+  settings: ServerSettings,
+  providers: ReadonlyArray<ServerProvider>,
+  projectId: ProjectId | null,
+  nowMs: number,
+): DelegationTargetState {
+  const { enabled, target } = resolveProjectSettings(settings, projectId).settings
+    .simpleTaskDelegation;
+  if (!enabled || target === null) return { status: "off" };
+  const until = settings.delegationCooldowns[target.instanceId];
+  if (until !== undefined && Date.parse(until) > nowMs) return { status: "cooling", target, until };
+  const provider = providers.find((candidate) => candidate.instanceId === target.instanceId);
+  const usable =
+    resolveProjectProviderInstanceEnabled(settings, projectId, target.instanceId) &&
+    provider !== undefined &&
+    provider.enabled &&
+    isProviderAvailable(provider) &&
+    provider.status !== "error" &&
+    provider.status !== "disabled" &&
+    (usedPercent(provider, target.model) ?? 0) < 100;
+  return usable ? { status: "ready", target } : { status: "unavailable", target };
+}
+
+/**
+ * The cooldowns to store after a delegated thread's run ends, or null to keep them. A delegate that
+ * ran out of quota on a delegation target sidelines that target for an hour.
+ */
+export function delegationCooldownsAfterRun(
+  settings: ServerSettings,
+  thread: Pick<
+    OrchestrationV2ThreadShell,
+    | "status"
+    | "lastErrorClass"
+    | "lastErrorCode"
+    | "lastError"
+    | "modelSelection"
+    | "lineage"
+    | "delegatedFrom"
+  >,
+  nowMs: number,
+): Readonly<Record<ProviderInstanceId, string>> | null {
+  if (thread.status !== "failed" || !isDelegatedAppThread(thread) || !isQuotaFailure(thread)) {
+    return null;
+  }
+  const { instanceId } = thread.modelSelection;
+  const configured = [
+    settings.simpleTaskDelegation,
+    ...Object.values(settings.projectSettingsOverrides).map((entry) => entry.simpleTaskDelegation),
+  ].some((delegation) => delegation?.target?.instanceId === instanceId);
+  if (!configured) return null;
+  const active = Object.entries(settings.delegationCooldowns).filter(
+    ([, until]) => Date.parse(until) > nowMs,
+  );
+  return {
+    ...Object.fromEntries(active),
+    [instanceId]: DateTime.formatIso(DateTime.makeUnsafe(nowMs + DELEGATION_COOLDOWN_MS)),
+  };
 }

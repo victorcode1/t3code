@@ -16,6 +16,7 @@ import {
   EnvironmentId,
   ForwardCompatibleNullable,
   ForwardCompatibleOptional,
+  IsoDateTime,
   OmittedWhenNull,
   ProjectId,
   ThreadId,
@@ -790,6 +791,13 @@ export const ProviderAutoSwitchSettings = Schema.Struct({
 });
 export type ProviderAutoSwitchSettings = typeof ProviderAutoSwitchSettings.Type;
 
+/** Lets the thread's agent hand mechanical subtasks to `target` through `delegate_task`. */
+export const SimpleTaskDelegationSettings = Schema.Struct({
+  enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  target: Schema.NullOr(ModelSelection).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+});
+export type SimpleTaskDelegationSettings = typeof SimpleTaskDelegationSettings.Type;
+
 // Shipped clients reject the whole server config unless `compactIdleThreads` is boolean.
 // Keep the mode in `idleCompaction`, but accept strings from older servers.
 const LegacyCompactIdleThreads = Schema.Union([Schema.Boolean, IdleCompactionMode]);
@@ -1218,6 +1226,7 @@ export const PROJECT_SCOPED_SERVER_SETTING_KEYS = [
   "responseStreamingMode",
   "speechProjectCustomWords",
   "providerAutoSwitch",
+  "simpleTaskDelegation",
 ] as const;
 export type ProjectScopedServerSettingKey = (typeof PROJECT_SCOPED_SERVER_SETTING_KEYS)[number];
 
@@ -1257,6 +1266,7 @@ export const ProjectSettingsOverrides = Schema.Struct({
   responseStreamingMode: Schema.optionalKey(ResponseStreamingMode),
   speechProjectCustomWords: Schema.optionalKey(SpeechCustomWords),
   providerAutoSwitch: Schema.optionalKey(ProviderAutoSwitchSettings),
+  simpleTaskDelegation: Schema.optionalKey(SimpleTaskDelegationSettings),
   providerInstances: Schema.optionalKey(
     Schema.Record(ProviderInstanceId, ProjectProviderInstanceOverride),
   ),
@@ -1482,6 +1492,13 @@ export const ServerSettings = Schema.Struct({
   snoozeLimitedThreads: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   autoResumeLimitedThreads: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   providerAutoSwitch: ProviderAutoSwitchSettings.pipe(
+    Schema.withDecodingDefault(Effect.succeed({})),
+  ),
+  simpleTaskDelegation: SimpleTaskDelegationSettings.pipe(
+    Schema.withDecodingDefault(Effect.succeed({})),
+  ),
+  /** Until when each delegation target is skipped after a delegate ran out of quota. */
+  delegationCooldowns: Schema.Record(ProviderInstanceId, IsoDateTime).pipe(
     Schema.withDecodingDefault(Effect.succeed({})),
   ),
   snoozePresets: SnoozePresetSettings.pipe(
@@ -1936,6 +1953,8 @@ export const ServerSettingsPatch = Schema.Struct({
   sidebarAutoSettleOnMerge: Schema.optionalKey(Schema.Boolean),
   autoResumeLimitedThreads: Schema.optionalKey(Schema.Boolean),
   providerAutoSwitch: Schema.optionalKey(ProviderAutoSwitchSettings),
+  simpleTaskDelegation: Schema.optionalKey(SimpleTaskDelegationSettings),
+  delegationCooldowns: Schema.optionalKey(Schema.Record(ProviderInstanceId, IsoDateTime)),
   snoozeLimitedThreads: Schema.optionalKey(Schema.Boolean),
   snoozePresets: Schema.optionalKey(SnoozePresetSettings),
   hiddenThreadTags: Schema.optionalKey(Schema.Array(Schema.String)),

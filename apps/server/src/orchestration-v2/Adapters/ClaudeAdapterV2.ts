@@ -3029,15 +3029,37 @@ const withClaudeAppContext = (
   message: SDKUserMessage,
   appContext: NonNullable<ProviderAdapter.ProviderAdapterV2TurnInput["appContext"]>,
   reservation: Effect.Success<ReturnType<typeof reserveClaudePdfBudget>>,
+): SDKUserMessage =>
+  withClaudeLeadingText(
+    message,
+    appContext.map((entry) => `<external_${entry.key}>${entry.text}</external_${entry.key}>`),
+    reservation,
+  );
+
+// T3's own per-turn guidance; the system prompt is fixed for the session, so it rides the turn.
+const withClaudeDelegation = (
+  message: SDKUserMessage,
+  instructions: string | undefined,
+  reservation: Effect.Success<ReturnType<typeof reserveClaudePdfBudget>>,
+): SDKUserMessage =>
+  withClaudeLeadingText(
+    message,
+    instructions === undefined
+      ? []
+      : [`<t3_code_delegation>\n${instructions}\n</t3_code_delegation>`],
+    reservation,
+  );
+
+const withClaudeLeadingText = (
+  message: SDKUserMessage,
+  texts: ReadonlyArray<string>,
+  reservation: Effect.Success<ReturnType<typeof reserveClaudePdfBudget>>,
 ): SDKUserMessage => {
   const content = message.message.content;
-  if (appContext.length === 0 || (typeof content === "string" && content.startsWith("/"))) {
+  if (texts.length === 0 || (typeof content === "string" && content.startsWith("/"))) {
     return message;
   }
-  const contextBlocks = appContext.map((entry) => ({
-    type: "text" as const,
-    text: `<external_${entry.key}>${entry.text}</external_${entry.key}>`,
-  }));
+  const contextBlocks = texts.map((text) => ({ type: "text" as const, text }));
   const bytes = Buffer.byteLength(encodeClaudeJson(contextBlocks));
   reservation.budget.pending.bytes += bytes;
   reservation.bytes += bytes;
@@ -13261,7 +13283,11 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                           pdfReservation,
                         );
                         appContextSent = withContext !== message;
-                        return withContext;
+                        return withClaudeDelegation(
+                          withContext,
+                          turnInput.delegationInstructions,
+                          pdfReservation,
+                        );
                       }),
                       Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
                       Effect.provideService(Path.Path, path),

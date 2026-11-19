@@ -284,6 +284,16 @@ turn those providers off under **Providers**. Auto-switch never moves a thread
 to a provider its project turns off, and the project can set its own mode and
 route under **Auto-switch provider** while other projects keep the shared one.
 
+To save usage on your main providers, turn on **Delegate simple tasks** in
+**Settings → Providers** and pick a cheaper target, such as OpenCode on its
+default model. Claude and Codex agents then hand mechanical subtasks, such as
+renames, formatting, file searches and log summaries, to that target as
+delegated tasks and keep design, hard debugging and the final review. When a
+delegate runs out of quota or balance, the agent does that part itself and T3
+Code stops delegating to that target for an hour; the setting shows until when,
+and **Retry now** ends the wait early. Like auto-switch, a project can set its
+own target, and only providers the project keeps on are offered.
+
 On web and desktop, use **Agents** to follow work delegated to subagents.
 On mobile, open a subagent from its conversation card or **Agents**. On iOS
 layouts with an inspector, its thread opens beside the parent. Maximize it to

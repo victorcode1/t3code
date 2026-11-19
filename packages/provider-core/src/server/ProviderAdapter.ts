@@ -559,6 +559,8 @@ export interface ProviderAdapterV2TurnInput {
   readonly modelSelection: ModelSelection;
   readonly runtimePolicy: ProviderAdapterV2RuntimePolicy;
   readonly appContext?: ReadonlyArray<{ readonly key: string; readonly text: string }>;
+  /** T3's guidance for this turn only; adapters without a trusted per-turn channel ignore it. */
+  readonly delegationInstructions?: string;
 }
 
 export type ProviderAdapterV2ResumeTurnInput = Omit<
