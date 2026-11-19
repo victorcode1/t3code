@@ -1772,14 +1772,23 @@ html[data-theme-scene] [data-thread-details-card] {
 html[data-theme-scene] [data-terminal-actions] {
   @apply surface-glass;
 }
-html[data-theme-scene] :is([data-thread-terminal-drawer], [data-panel-empty]) {
+html[data-theme-scene]
+  :is([data-thread-terminal-drawer], [data-panel-empty], [data-side-chat-pane]) {
   background: color-mix(in srgb, var(--background) calc(var(--glass-opacity) / 4), transparent);
 }
 html[data-theme-scene] [data-thread-terminal-drawer] {
   --terminal-background: transparent;
 }
-html[data-theme-scene] [data-preview-panel-mode]:has([data-thread-terminal-drawer]) {
+html[data-theme-scene]
+  [data-preview-panel-mode]:has(:is([data-thread-terminal-drawer], [data-side-chat-pane])),
+html[data-theme-scene] [data-side-chat-pane] [data-chat-view] {
   background: transparent;
+}
+/* The side chat's composer stays solid so its text reads over the scene. */
+html[data-theme-scene]
+  [data-side-chat-pane]
+  :is([data-slot="composer-shell"], [data-slot="composer-context-strip"]) {
+  --glass-opacity: 100%;
 }
 
 #root {
