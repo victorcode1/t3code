@@ -4,7 +4,7 @@ import type { EnvironmentId } from "@t3tools/contracts";
 
 import { appAtomRegistry, subscribeAtomChanges } from "./rpc/atomRegistry";
 import { assetEnvironment } from "./state/assets";
-import { themeEnvironmentIdAtom } from "./state/primaryEnvironment";
+import { localEnvironmentIdAtom } from "./state/primaryEnvironment";
 import { themeServerEnvironmentThemesAtom } from "./state/server";
 import { environmentSession } from "./state/session";
 import { getCustomThemes } from "./themePalette";
@@ -64,7 +64,7 @@ async function sceneUrl(
 export function applyThemeScene(themeId: string | undefined): void {
   if (typeof document === "undefined") return;
   appliedThemeId = themeId;
-  const environmentId = appAtomRegistry.get(themeEnvironmentIdAtom);
+  const environmentId = appAtomRegistry.get(localEnvironmentIdAtom);
   // A saved theme wins its id over a published one, so the published scene is not its.
   const revision =
     themeId === undefined || getCustomThemes().some((theme) => theme.id === themeId)
