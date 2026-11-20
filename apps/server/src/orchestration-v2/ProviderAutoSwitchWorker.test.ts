@@ -8,7 +8,11 @@ import {
   type ServerProvider,
 } from "@t3tools/contracts";
 
-import { autoSwitchCommands } from "./ProviderAutoSwitchWorker.ts";
+import {
+  autoSwitchAttemptFor,
+  autoSwitchCommands,
+  type BlockedAutoSwitch,
+} from "./ProviderAutoSwitchWorker.ts";
 
 const runId = RunId.make("run:1");
 const selection = (instanceId: string) => ({
@@ -76,6 +80,16 @@ describe("autoSwitchCommands", () => {
       commands[0]?.type === "provider.switch" ? commands[0].modelSelection : null,
       selection("personal"),
     );
+    const retry = autoSwitchCommands({
+      thread: thread("failed", "usage_limit"),
+      runId,
+      settings: { ...settings, trigger: "exhausted" },
+      providers: [provider("work", 100), provider("personal", 10)],
+      attempt: 1,
+    });
+    // A refused switch leaves a rejected receipt, so its retry needs a fresh id.
+    assert.notStrictEqual(retry[0]?.commandId, commands[0]?.commandId);
+    assert.strictEqual(retry[1]?.commandId, commands[1]?.commandId);
   });
 
   it("switches without continuing a completed run past the threshold", () => {
@@ -90,5 +104,29 @@ describe("autoSwitchCommands", () => {
       commandTypes({ providers: [provider("work", 85), provider("personal", 95)] }),
       [],
     );
+  });
+});
+
+describe("autoSwitchAttemptFor", () => {
+  const threadId = ThreadId.make("thread:1");
+  const event = (type: string, payload: unknown = {}) =>
+    ({ type, threadId, payload }) as unknown as Parameters<typeof autoSwitchAttemptFor>[0];
+  const blocked = new Map<ThreadId, BlockedAutoSwitch>([[threadId, { runId, attempt: 2 }]]);
+
+  it("tries a run that ended and retries a refused switch when background work changes", () => {
+    assert.deepStrictEqual(
+      autoSwitchAttemptFor(
+        event("run.updated", { id: runId, threadId, status: "failed" }),
+        new Map(),
+      ),
+      { threadId, runId, attempt: 0 },
+    );
+    assert.deepStrictEqual(autoSwitchAttemptFor(event("provider-session.detached"), blocked), {
+      threadId,
+      runId,
+      attempt: 3,
+    });
+    assert.strictEqual(autoSwitchAttemptFor(event("provider-session.detached"), new Map()), null);
+    assert.strictEqual(autoSwitchAttemptFor(event("thread.visit-recorded"), blocked), null);
   });
 });
