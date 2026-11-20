@@ -55,6 +55,9 @@ it("shows the titled preview inside and outside search results from a collapsed 
   await expect.element(folder).toHaveAttribute("aria-expanded", "true");
   // A removed row fades out as a clone without its test id, so match the live row only.
   const secondRow = page.getByTestId("sidebar-row-folder").filter({ hasText: second.title });
+  // Folders list only today's threads until their older ones are shown.
+  await expect.element(secondRow).not.toBeInTheDocument();
+  await page.getByRole("button", { name: "Show 1 older thread" }).click();
   await expect.element(secondRow).toBeInTheDocument();
   // The shift guard drops pointer presses on a row that appeared under 500ms ago; keys pass.
   folder.element().focus();

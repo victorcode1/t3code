@@ -1078,7 +1078,7 @@ export function orderSidebarFolderGroups<TGroup extends { readonly isScratch?: b
 export type SidebarDateBucket = "today" | "yesterday" | "week" | "month" | "older";
 
 /** The history heading a time falls under, by calendar days in the viewer's time zone. */
-function sidebarDateBucket(timeMs: number, now: Date): SidebarDateBucket {
+export function sidebarDateBucket(timeMs: number, now: Date): SidebarDateBucket {
   const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
   const daysAgo = (days: number) =>
     new Date(now.getFullYear(), now.getMonth(), now.getDate() - days).getTime();
