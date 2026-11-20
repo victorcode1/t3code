@@ -2,6 +2,7 @@ import {
   CommandId,
   MessageId,
   type OrchestrationV2Command,
+  type OrchestrationV2DomainEvent,
   type OrchestrationV2ThreadShell,
   type ProviderAutoSwitchSettings,
   type RunId,
@@ -26,7 +27,8 @@ import * as ThreadManagement from "./ThreadManagementService.ts";
 /**
  * Commands that move a thread along the auto-switch route once `runId` ends. A run that hit its
  * usage limit switches and continues; a run that finished past the threshold switches so the next
- * message goes to the new provider. The ids derive from the run, so a replayed event is a no-op.
+ * message goes to the new provider. The ids derive from the run, so a replayed event is a no-op;
+ * `attempt` keeps a retry from replaying the receipt of a refused switch.
  */
 export function autoSwitchCommands(input: {
   readonly thread: Pick<
@@ -44,8 +46,9 @@ export function autoSwitchCommands(input: {
   readonly runId: RunId;
   readonly settings: ProviderAutoSwitchSettings;
   readonly providers: ReadonlyArray<ServerProvider>;
+  readonly attempt?: number;
 }): ReadonlyArray<OrchestrationV2Command> {
-  const { thread, runId, settings, providers } = input;
+  const { thread, runId, settings, providers, attempt = 0 } = input;
   if (
     settings.mode !== "route" ||
     thread.latestRunId !== runId ||
@@ -69,7 +72,9 @@ export function autoSwitchCommands(input: {
   const commands: Array<OrchestrationV2Command> = [
     {
       type: "provider.switch",
-      commandId: CommandId.make(`auto-switch:${identity}`),
+      commandId: CommandId.make(
+        attempt === 0 ? `auto-switch:${identity}` : `auto-switch:${identity}:retry:${attempt}`,
+      ),
       threadId: thread.id,
       modelSelection: target,
     },
@@ -90,6 +95,38 @@ export function autoSwitchCommands(input: {
   return commands;
 }
 
+// Events that can mean a session's background work ended, so a refused switch may now go through.
+const BACKGROUND_WORK_EVENTS: ReadonlySet<OrchestrationV2DomainEvent["type"]> = new Set([
+  "provider-session.detached",
+  "provider-session.updated",
+  "provider-turn.updated",
+  "run.background-work-cancelled",
+  "subagent.updated",
+  "node.updated",
+]);
+
+export interface BlockedAutoSwitch {
+  readonly runId: RunId;
+  readonly attempt: number;
+}
+
+/** The switch attempt `event` calls for: a run that just ended, or a retry of a refused switch. */
+export function autoSwitchAttemptFor(
+  event: OrchestrationV2DomainEvent,
+  blocked: ReadonlyMap<OrchestrationV2ThreadShell["id"], BlockedAutoSwitch>,
+): (BlockedAutoSwitch & { readonly threadId: OrchestrationV2ThreadShell["id"] }) | null {
+  if (
+    event.type === "run.updated" &&
+    (event.payload.status === "completed" || event.payload.status === "failed")
+  ) {
+    return { threadId: event.payload.threadId, runId: event.payload.id, attempt: 0 };
+  }
+  const waiting = blocked.get(event.threadId);
+  return waiting !== undefined && BACKGROUND_WORK_EVENTS.has(event.type)
+    ? { threadId: event.threadId, runId: waiting.runId, attempt: waiting.attempt + 1 }
+    : null;
+}
+
 export const layer = Layer.effectDiscard(
   Effect.gen(function* () {
     const projections = yield* ProjectionStore.ProjectionStoreV2;
@@ -98,43 +135,67 @@ export const layer = Layer.effectDiscard(
     const settings = yield* ServerSettings.ServerSettingsService;
     const registry = yield* ProviderRegistry;
 
-    const onRunEnded = Effect.fn("ProviderAutoSwitchWorker.onRunEnded")(function* (run: {
-      readonly threadId: OrchestrationV2ThreadShell["id"];
-      readonly runId: RunId;
-    }) {
+    // Threads whose switch the orchestrator refused, usually because background work would end.
+    // Their next session or background-work change retries it.
+    const blocked = new Map<OrchestrationV2ThreadShell["id"], BlockedAutoSwitch>();
+
+    const trySwitch = Effect.fn("ProviderAutoSwitchWorker.trySwitch")(function* (
+      threadId: OrchestrationV2ThreadShell["id"],
+      runId: RunId,
+      attempt: number,
+    ) {
       const current = yield* settings.getSettings;
-      const thread = yield* projections.getThreadShell(run.threadId);
-      if (thread === null) return;
-      const commands = autoSwitchCommands({
-        thread,
-        runId: run.runId,
-        settings: projectAutoSwitchSettings(current, thread.projectId),
-        providers: yield* registry.getProviders,
-      });
-      for (const command of commands) yield* threads.dispatch(command);
-      if (commands.length > 0) {
-        yield* Effect.logInfo("orchestration-v2.provider-auto-switch.switched", {
-          threadId: run.threadId,
-          from: thread.modelSelection.instanceId,
-          to:
-            commands[0]?.type === "provider.switch" ? commands[0].modelSelection.instanceId : null,
-        });
+      const thread = yield* projections.getThreadShell(threadId);
+      const commands =
+        thread === null
+          ? []
+          : autoSwitchCommands({
+              thread,
+              runId,
+              settings: projectAutoSwitchSettings(current, thread.projectId),
+              providers: yield* registry.getProviders,
+              attempt,
+            });
+      const [switchCommand, ...rest] = commands;
+      if (thread === null || switchCommand === undefined) {
+        blocked.delete(threadId);
+        return;
       }
+      const switched = yield* threads.dispatch(switchCommand).pipe(
+        Effect.as(true),
+        Effect.catchCause((cause) =>
+          Effect.logInfo("orchestration-v2.provider-auto-switch.blocked", { threadId, cause }).pipe(
+            Effect.as(false),
+          ),
+        ),
+      );
+      if (!switched) {
+        blocked.set(threadId, { runId, attempt });
+        return;
+      }
+      blocked.delete(threadId);
+      for (const command of rest) yield* threads.dispatch(command);
+      yield* Effect.logInfo("orchestration-v2.provider-auto-switch.switched", {
+        threadId,
+        from: thread.modelSelection.instanceId,
+        to:
+          switchCommand.type === "provider.switch" ? switchCommand.modelSelection.instanceId : null,
+      });
     });
 
     yield* forkParked(
       Stream.runForEach(orchestrator.streamDomainEvents, (event) =>
-        event.type === "run.updated" &&
-        (event.payload.status === "completed" || event.payload.status === "failed")
-          ? onRunEnded({ threadId: event.payload.threadId, runId: event.payload.id }).pipe(
-              Effect.catchCause((cause) =>
-                Effect.logWarning("orchestration-v2.provider-auto-switch.failed", {
-                  threadId: event.payload.threadId,
-                  cause,
-                }),
-              ),
-            )
-          : Effect.void,
+        Effect.suspend(() => {
+          const next = autoSwitchAttemptFor(event, blocked);
+          return next === null ? Effect.void : trySwitch(next.threadId, next.runId, next.attempt);
+        }).pipe(
+          Effect.catchCause((cause) =>
+            Effect.logWarning("orchestration-v2.provider-auto-switch.failed", {
+              threadId: event.threadId,
+              cause,
+            }),
+          ),
+        ),
       ),
     );
   }),

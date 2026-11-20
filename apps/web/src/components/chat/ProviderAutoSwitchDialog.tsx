@@ -224,3 +224,111 @@ export function ProviderAutoSwitchDialog({
     </Dialog>
   );
 }
+
+/**
+ * In route mode, a switch waits while the old session runs background work, since switching ends it.
+ * Stopping the session lets the server's waiting switch go through now.
+ */
+export function ProviderAutoSwitchBlockedDialog({
+  environmentId,
+  thread,
+  lastErrorClass,
+  hasBackgroundWork,
+  providers,
+  settings,
+}: {
+  readonly environmentId: EnvironmentId;
+  readonly thread: Parameters<typeof ProviderAutoSwitchDialog>[0]["thread"];
+  readonly lastErrorClass: string | null | undefined;
+  readonly hasBackgroundWork: boolean;
+  readonly providers: ReadonlyArray<ServerProvider>;
+  readonly settings: UnifiedSettings;
+}) {
+  const gt = useGT();
+  const messages = useMessages();
+  const [closedRunId, setClosedRunId] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [mountedAt] = useState(() => Date.now());
+  const stopSession = useOrchestrationCommand(threadEnvironment.stopSession, {
+    label: "stop background work",
+  });
+  const autoSwitch = projectAutoSwitchSettings(settings, thread.projectId);
+  const run = thread.latestRun;
+  const reason =
+    autoSwitch.mode === "route" && hasBackgroundWork && run !== null && run.runId !== closedRunId
+      ? autoSwitchReason({
+          settings: autoSwitch,
+          providers,
+          selection: thread.modelSelection,
+          runStatus: run.status,
+          lastErrorClass,
+        })
+      : null;
+  const recent =
+    run?.completedAt != null && Date.parse(run.completedAt) > mountedAt - RECENT_RUN_MS;
+  const target =
+    reason === null ? null : nextAutoSwitchTarget(autoSwitch, providers, thread.modelSelection);
+  if (reason === null || !recent || run === null || target === null) return null;
+
+  const entries = providerInstanceEntriesFor(providers, settings, thread.projectId);
+  const nameOf = (instanceId: string) =>
+    entries.find((entry) => entry.instanceId === instanceId)?.displayName ?? instanceId;
+  const current = providers.find(
+    (provider) => provider.instanceId === thread.modelSelection.instanceId,
+  );
+  const used =
+    autoSwitch.trigger === "exhausted"
+      ? null
+      : usedPercent(current, thread.modelSelection.model, autoSwitch.trigger);
+  const close = () => setClosedRunId(run.runId);
+
+  const stopAndSwitch = async () => {
+    setBusy(true);
+    const result = await stopSession({ environmentId, input: { threadId: thread.id } });
+    setBusy(false);
+    if (result._tag === "Failure") {
+      toastManager.add({
+        type: "error",
+        title: gt("Could not switch provider"),
+        description:
+          thrownErrorMessage(squashAtomCommandFailure(result), messages) ?? gt("Try again."),
+      });
+      return;
+    }
+    close();
+  };
+
+  return (
+    <Dialog open onOpenChange={(open) => !open && close()}>
+      <DialogPopup className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>
+            <T>Switch provider?</T>
+          </DialogTitle>
+          <DialogDescription>
+            {reason === "exhausted"
+              ? gt("{provider} reached its usage limit.", {
+                  provider: nameOf(thread.modelSelection.instanceId),
+                })
+              : gt("{provider} has used {percent}% of its limit.", {
+                  provider: nameOf(thread.modelSelection.instanceId),
+                  percent: Math.round(used ?? 0),
+                })}{" "}
+            {gt(
+              "Switching to {target} now stops its background work. Otherwise the thread switches when that work finishes.",
+              { target: nameOf(target.instanceId) },
+            )}
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter variant="bare">
+          <Button variant="outline" onClick={close}>
+            <T>Wait</T>
+          </Button>
+          <Button disabled={busy} onClick={() => void stopAndSwitch()}>
+            <T>Stop and switch</T>
+          </Button>
+        </DialogFooter>
+      </DialogPopup>
+    </Dialog>
+  );
+}
