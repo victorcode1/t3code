@@ -284,6 +284,37 @@ DMGs default to the host architecture. Use `--arch` to choose another target and
 to retain packaging files for inspection. Run `vp run dist:desktop:artifact --help` for other
 options.
 
+### DMG notarizado de T3 Code (Vic)
+
+En el fork `victorcode1/t3code`, compila desde `dev-vic` en un Mac Apple Silicon. El flujo requiere
+`~/t3code-signing/sign-notarize.sh` y su `entitlements.plist`, el certificado Developer ID
+Application de Victor Flores y el perfil `t3-notary` en el llavero del Mac.
+
+Desde la raíz del repositorio, ejecuta el bloque completo. Usa una carpeta nueva en Descargas para
+que el script tome únicamente el ZIP y el DMG de esta compilación.
+
+```sh
+(
+  set -eu
+  test "$(git branch --show-current)" = dev-vic
+  test -x "$HOME/t3code-signing/sign-notarize.sh"
+  version=$(node -p 'require("./apps/desktop/package.json").version')
+  release_dir=$(mktemp -d "$HOME/Downloads/T3-Code-Vic-${version}.XXXXXX")
+
+  vp run dist:desktop:dmg:arm64 --output-dir "$release_dir"
+  "$HOME/t3code-signing/sign-notarize.sh" "$release_dir"
+
+  dmg="$release_dir/T3-Code-${version}-arm64-notarized.dmg"
+  xcrun stapler validate "$dmg"
+  spctl -a -vv -t open --context context:primary-signature "$dmg"
+  printf 'DMG final: %s\n' "$dmg"
+)
+```
+
+El script firma la app, espera a que Apple la acepte, adjunta su ticket y repite el proceso con el
+DMG. Entrega el archivo `*-notarized.dmg` cuando `stapler validate` pase y Gatekeeper indique
+`source=Notarized Developer ID`.
+
 ### Prepared server bytecode
 
 Native macOS and Windows desktop artifact builds, and native Linux x64 and ARM64 builds, generate server

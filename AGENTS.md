@@ -161,6 +161,8 @@ For mobile verification, a missing or outdated native client is an install step,
 
 ## Documentation
 
+For a personal T3 Code (Vic) DMG from `dev-vic`, follow the complete [local signing and notarization workflow](docs/operations/development.md#dmg-notarizado-de-t3-code-vic) before delivering the installer.
+
 Most code changes do not need an internal documentation change. Agents can read the code.
 
 - `docs/internals/` is for architectural decisions and their reasons, constraints that span components, and implementation traps that are hard to discover from the source. Before adding a paragraph, ask what a maintainer would get wrong without it. If reading the relevant code answers the question, leave it out.
